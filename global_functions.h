@@ -253,4 +253,66 @@ bool isInBounds(Position pos, int rows, int cols) {
     return pos.x >= 0 && pos.x < rows && pos.y >= 0 && pos.y < cols;
 }
 
+struct Position3D {
+    int64_t x;
+    int64_t y;
+    int64_t z;
+
+    bool operator==(const Position3D& other) const {
+        return x == other.x && y == other.y && z == other.z;
+    }
+
+    bool operator<(const Position3D& other) const {
+        if (x != other.x) {
+            return x < other.x;
+        }
+        if (y != other.y) {
+            return y < other.y;
+        }
+        return z < other.z;
+    }
+
+    Position3D operator+(const Position3D& other) const {
+        return { x + other.x, y + other.y, z + other.z };
+    }
+
+    Position3D operator-(const Position3D& other) const {
+        return { x - other.x, y - other.y, z - other.z };
+    }
+
+    Position3D operator*(int scalar) const {
+        return { x * scalar, y * scalar, z * scalar };
+    }
+
+    Position3D& operator=(const Position3D& other) {
+        if (this != &other) {
+            x = other.x;
+            y = other.y;
+            z = other.z;
+        }
+        return *this;
+    }
+
+    double length() const {
+        return std::sqrt(
+            static_cast<double>(x) * x +
+            static_cast<double>(y) * y +
+            static_cast<double>(z) * z
+        );
+    }
+};
+
+struct Position3DHash {
+    std::size_t operator()(const Position3D& pos) const {
+        // Combine the hash of x, y, and z
+        std::size_t hx = std::hash<int64_t>()(pos.x);
+        std::size_t hy = std::hash<int64_t>()(pos.y);
+        std::size_t hz = std::hash<int64_t>()(pos.z);
+
+        return hx ^ (hy << 1) ^ (hz << 2);
+    }
+};
+
+
+
 #endif
