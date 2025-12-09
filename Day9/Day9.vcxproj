@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{4fd05e26-f10e-44ec-9f6e-63a787746bfd}</ProjectGuid>
-    <RootNamespace>Day1</RootNamespace>
+    <ProjectGuid>{67d6f8e0-df42-4391-aa42-b9e5a056eaee}</ProjectGuid>
+    <RootNamespace>Day9</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -106,7 +106,6 @@
       <ConformanceMode>true</ConformanceMode>
       <Optimization>Disabled</Optimization>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalOptions>-fsanitize=undefined %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -128,8 +127,12 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <ClCompile>
+      <AdditionalOptions>-fsanitize=undefined %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\includes.cpp" />
     <Text Include="input1.txt">
       <FileType>CppCode</FileType>
     </Text>
