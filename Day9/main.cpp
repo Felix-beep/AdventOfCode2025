@@ -14,60 +14,15 @@ struct PointHash {
     std::size_t operator()(const Point& p) const noexcept {
         std::size_t h1 = std::hash<int64_t>{}(p.first);
         std::size_t h2 = std::hash<int64_t>{}(p.second);
+
+        // Standard hash combine
         return h1 ^ (h2 + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2));
     }
 };
 
-std::vector<AxisPair> twoLargestAxisAlignedPairs(const std::vector<Point>& points)
-{
-    // x -> list of ys; y -> list of xs
-    std::map<int64_t, std::vector<int64_t>> ys_at_x;
-    std::map<int64_t, std::vector<int64_t>> xs_at_y;
-
-    for (const auto& [x, y] : points) {
-        ys_at_x[x].push_back(y);  // vertical candidates
-        xs_at_y[y].push_back(x);  // horizontal candidates
-    }
-
-    AxisPair best1{ {0,0},{0,0}, -1 };
-    AxisPair best2{ {0,0},{0,0}, -1 };
-
-    auto consider = [&](const Point& a, const Point& b, int64_t d) {
-        if (d > best1.dist) {
-            best2 = best1;
-            best1 = AxisPair{ a, b, d };
-        }
-        else if (d > best2.dist) {
-            best2 = AxisPair{ a, b, d };
-        }
-        };
-
-    // vertical segments (same x)
-    for (auto& [x, ys] : ys_at_x) {
-        if (ys.size() < 2) continue;
-        std::sort(ys.begin(), ys.end());
-        int64_t d = ys.back() - ys.front();
-        consider(Point{ x, ys.front() }, Point{ x, ys.back() }, d);
-    }
-
-    // horizontal segments (same y)
-    for (auto& [y, xs] : xs_at_y) {
-        if (xs.size() < 2) continue;
-        std::sort(xs.begin(), xs.end());
-        int64_t d = xs.back() - xs.front();
-        consider(Point{ xs.front(), y }, Point{ xs.back(), y }, d);
-    }
-
-    std::vector<AxisPair> result;
-    if (best1.dist >= 0) result.push_back(best1);
-    if (best2.dist >= 0 && !(best2.a == best1.a && best2.b == best1.b) &&
-        !(best2.a == best1.b && best2.b == best1.a)) {
-        result.push_back(best2);
-    }
-    return result;
-}
-
-bool is_valid_rectangle(const vector<Point>& points, const Point& p1, const Point& p2)
+bool is_valid_rectangle_edges_ok(const std::vector<Point>& points,
+    const Point& p1,
+    const Point& p2)
 {
     auto [x1, y1] = p1;
     auto [x2, y2] = p2;
@@ -81,126 +36,73 @@ bool is_valid_rectangle(const vector<Point>& points, const Point& p1, const Poin
     if (xmin == xmax || ymin == ymax)
         return false;
 
-    // Per-row: bit 0 = has vertical edge (left/right)
-    //          bit 1 = has interior x (between xmin and xmax)
-    std::unordered_map<int64_t, uint8_t> row_flags;
-    // Per-column: bit 0 = has horizontal edge (bottom/top)
-    //             bit 1 = has interior y (between ymin and ymax)
-    std::unordered_map<int64_t, uint8_t> col_flags;
+    // Reject if any point lies strictly inside the rectangle
+    for (const auto& p : points) {
+        auto [px, py] = p;
 
-    row_flags.reserve(std::size(points));
-    col_flags.reserve(std::size(points));
+        if (xmin < px && px < xmax &&
+            ymin < py && py < ymax) {
+            return false;  // strictly interior point → invalid
+        }
+    }
 
-    constexpr uint8_t EDGE = 1;
-    constexpr uint8_t INNER = 2;
+    // Edges and corners are allowed
+    return true;
+}
+
+bool is_valid_rectangle_corners_only(const std::vector<Point>& points,
+    const Point& p1,
+    const Point& p2)
+{
+    auto [x1, y1] = p1;
+    auto [x2, y2] = p2;
+
+    int64_t xmin = std::min(x1, x2);
+    int64_t xmax = std::max(x1, x2);
+    int64_t ymin = std::min(y1, y2);
+    int64_t ymax = std::max(y1, y2);
+
+    // Degenerate rectangles: no area
+    if (xmin == xmax || ymin == ymax)
+        return false;
+
+    bool hasExtraCorner = false;
 
     for (const auto& p : points) {
         auto [px, py] = p;
 
-        bool in_x_open = (xmin < px && px < xmax);
-        bool in_y_open = (ymin < py && py < ymax);
-        bool in_x_closed = (xmin <= px && px <= xmax);
-        bool in_y_closed = (ymin <= py && py <= ymax);
+        // 1) Strictly inside → always invalid
+        bool inside_strict =
+            (xmin < px && px < xmax &&
+                ymin < py && py < ymax);
 
-        // 1) Strict interior point → reject immediately
-        if (in_x_open && in_y_open) {
+        if (inside_strict) {
             return false;
         }
 
-        bool on_left = (px == xmin && in_y_closed);
-        bool on_right = (px == xmax && in_y_closed);
-        bool on_bottom = (py == ymin && in_x_closed);
-        bool on_top = (py == ymax && in_x_closed);
+        // 2) On boundary?
+        bool on_vertical_edge = (px == xmin || px == xmax) && (py >= ymin && py <= ymax);
+        bool on_horizontal_edge = (py == ymin || py == ymax) && (px >= xmin && px <= xmax);
+        bool on_edge = on_vertical_edge || on_horizontal_edge;
 
-        // --- Vertical edges vs interior along the same row (y) ---
+        // 3) Is this point exactly a corner?
+        bool is_corner =
+            ((px == xmin || px == xmax) &&
+                (py == ymin || py == ymax));
 
-        if (on_left || on_right) {
-            auto& rf = row_flags[py];
-            if (rf & INNER) {
-                // There is already a point between xmin and xmax on this row
-                // → some edge point on this row "sees" that point towards interior
-                return false;
-            }
-            rf |= EDGE;
+        // Edge but not at corner → forbidden
+        if (on_edge && !is_corner) {
+            return false;
         }
 
-        if (in_x_open && in_y_closed) {
-            // This point lies between xmin and xmax on row py
-            auto& rf = row_flags[py];
-            if (rf & EDGE) {
-                // There is already a left/right edge point on this row
-                // → that edge point "sees" this point towards interior
-                return false;
-            }
-            rf |= INNER;
-        }
-
-        // --- Horizontal edges vs interior along the same column (x) ---
-
-        if (on_bottom || on_top) {
-            auto& cf = col_flags[px];
-            if (cf & INNER) {
-                return false;
-            }
-            cf |= EDGE;
-        }
-
-        if (in_y_open && in_x_closed) {
-            // This point lies between ymin and ymax on column px
-            auto& cf = col_flags[px];
-            if (cf & EDGE) {
-                return false;
-            }
-            cf |= INNER;
+        // 4) Corner point that is not one of the defining corners → count it
+        if (is_corner && !(p == p1 || p == p2)) {
+            hasExtraCorner = true;
         }
     }
 
-    return true; // All conditions satisfied
-}
-
-std::pair<Point, Point> largestAxisAlignedPair(const std::vector<Point>& points)
-{
-    // Maps: x -> all y values; y -> all x values
-    std::map<int64_t, std::vector<int64_t>> ys_at_x;
-    std::map<int64_t, std::vector<int64_t>> xs_at_y;
-
-    for (const auto& [x, y] : points) {
-        ys_at_x[x].push_back(y);  // for vertical checks
-        xs_at_y[y].push_back(x);  // for horizontal checks
-    }
-
-    int64_t max_distance = -1;
-    Point bestA{ 0,0 }, bestB{ 0,0 };
-
-    // --- Vertical segments (same x) ---
-    for (auto& [x, ys] : ys_at_x) {
-        if (ys.size() < 2) continue;
-
-        std::sort(ys.begin(), ys.end());
-
-        int64_t d = ys.back() - ys.front();
-        if (d > max_distance) {
-            max_distance = d;
-            bestA = Point{ x, ys.front() };
-            bestB = Point{ x, ys.back() };
-        }
-    }
-
-    // --- Horizontal segments (same y) ---
-    for (auto& [y, xs] : xs_at_y) {
-        if (xs.size() < 2) continue;
-
-        std::sort(xs.begin(), xs.end());
-
-        int64_t d = xs.back() - xs.front();
-        if (d > max_distance) {
-            max_distance = d;
-            bestA = Point{ xs.front(), y };
-            bestB = Point{ xs.back(), y };
-        }
-    }
-
-    return { bestA, bestB };
+    // Valid only if there is at least one extra corner point
+    return hasExtraCorner;
 }
 
 int main() {
@@ -221,18 +123,27 @@ int main() {
         );
     }
 
-    int64_t highestArea = 0;
-    int64_t constrainedArea = 0;
-
-    auto topPairs = twoLargestAxisAlignedPairs(points);
-
-    // Collect their 4 endpoints into a set
-    std::unordered_set<Point, PointHash> important;
-    for (const auto& seg : topPairs) {
-        important.insert(seg.a);
-        important.insert(seg.b);
+    for (int y = 20; y > 0; --y) {
+        for (int x = 0; x < 10; x++) {
+            if (any_of(points.begin(), points.end(), [&](Point cmp) { return cmp.first == y && cmp.second == x; })) {
+                cout << "X";
+            }
+            else {
+                cout << "O";
+            }
+        }
+        cout << endl;
     }
 
+    int64_t highestArea = 0;       // largest area of ANY rectangle (even invalid)
+    int64_t bestValidArea = 0;     // largest area of rectangles that pass is_valid_rectangle
+    int64_t longestRecordedWidth = 0;
+
+    Point baseP1{ 0,0 }, baseP2{ 0,0 };   // corners of the best valid "base" rectangle
+
+    // --------------------------------------------------------
+    // 1) Find the largest-area valid rectangle (the base one)
+    // --------------------------------------------------------
     for (auto it1 = points.begin(); it1 != points.end(); ++it1) {
         for (auto it2 = std::next(it1); it2 != points.end(); ++it2) {
             const auto& p1 = *it1;
@@ -247,22 +158,123 @@ int main() {
             int64_t height = large.second + 1 - small.second;
             int64_t area = std::llabs(width * height);
 
+            // track unconstrained max area if you still want it
             if (area > highestArea) {
                 highestArea = area;
             }
 
-            // Only do the expensive check if there is a chance to improve
-            if (area > constrainedArea){
-                if (!important.contains(p1) && !important.contains(p2))
-                    continue;
-
-                if (is_valid_rectangle(points, p1, p2)) {
-                    constrainedArea = area;
+            // only check validity if it can beat current best valid area
+            if (width > longestRecordedWidth) {
+                if (is_valid_rectangle_corners_only(points, p1, p2)) {
+                    longestRecordedWidth = width;
+                    baseP1 = p1;
+                    baseP2 = p2;
                 }
-
             }
         }
     }
+
+    cout << baseP1.first << "/" << baseP1.second << " to " << baseP2.first << "/" << baseP2.second << endl;
+
+    // no valid rectangles;
+    if (longestRecordedWidth == 0) {
+        printSolution(highestArea, 0);
+        endClock(Clock);
+        return 0;
+    }
+
+    
+    // --------------------------------------------------------
+// 2) Extend from base rectangle using only corners that
+//    are present in the input point list.
+//    Rectangles must have both corners from `points` and
+//    no interior points (edges/corners allowed).
+// --------------------------------------------------------
+    int64_t constrainedArea = 0;
+
+    auto [bx1, by1] = baseP1;
+    auto [bx2, by2] = baseP2;
+
+    int64_t xmin = std::min(bx1, bx2);
+    int64_t xmax = std::max(bx1, bx2);
+    int64_t ymin = std::min(by1, by2);
+    int64_t ymax = std::max(by1, by2);
+
+    Point topLeft{ xmin, ymax };
+    Point topRight{ xmax, ymax };
+    Point bottomLeft{ xmin, ymin };
+    Point bottomRight{ xmax, ymin };
+
+    auto rect_area = [](const Point& a, const Point& b) -> int64_t {
+        int64_t w = std::llabs(a.first - b.first) + 1;
+        int64_t h = std::llabs(a.second - b.second) + 1;
+        return w * h;
+        };
+
+    // Build a set for quick membership checks
+    std::unordered_set<Point, PointHash> pointSet(points.begin(), points.end());
+
+    // Only corners that actually exist in the input can be used
+    std::vector<Point> topCorners;
+    std::vector<Point> bottomCorners;
+
+    if (pointSet.contains(topLeft))     topCorners.push_back(topLeft);
+    if (pointSet.contains(topRight))    topCorners.push_back(topRight);
+    if (pointSet.contains(bottomLeft))  bottomCorners.push_back(bottomLeft);
+    if (pointSet.contains(bottomRight)) bottomCorners.push_back(bottomRight);
+
+    // Optional tracking of the best extension
+    Point bestExtP1 = baseP1;
+    Point bestExtP2 = baseP2;
+
+    for (const auto& p : points) {
+        auto [px, py] = p;
+
+        // Only consider points horizontally aligned with the base rectangle
+        if (px < xmin || px > xmax) {
+            continue;
+        }
+
+        // ===================== CASE 1: p ABOVE the top edge =====================
+        if (py > ymax && !topCorners.empty()) {
+            // For each *existing* top corner, try rectangle (corner, p)
+            for (const auto& corner : topCorners) {
+                // Both `corner` and `p` are guaranteed to be in the input
+
+                if (!is_valid_rectangle_edges_ok(points, corner, p)) {
+                    continue;
+                }
+
+                int64_t area = rect_area(corner, p);
+                if (area > constrainedArea) {
+                    constrainedArea = area;
+                    bestExtP1 = corner;
+                    bestExtP2 = p;
+                }
+            }
+        }
+
+        // ===================== CASE 2: p BELOW the bottom edge =====================
+        else if (py < ymin && !bottomCorners.empty()) {
+            for (const auto& corner : bottomCorners) {
+                if (!is_valid_rectangle_edges_ok(points, corner, p)) {
+                    continue;
+                }
+
+                int64_t area = rect_area(corner, p);
+                if (area > constrainedArea) {
+                    constrainedArea = area;
+                    bestExtP1 = corner;
+                    bestExtP2 = p;
+                }
+            }
+        }
+    }
+
+    // `constrainedArea` is now the largest area of a rectangle such that:
+    //  - both corners are in the original point list
+    //  - one corner is on the top edge (if p is above) or bottom edge (if p is below)
+    //  - there are no interior points (edges and corners are allowed)
 
     printSolution(highestArea, constrainedArea);
 
